@@ -3,7 +3,7 @@ import "./assets/less/app.less";
 import {
     dataChannelIncomingSubject,
     dataChannelOutgoingSubject
-} from './socket.js';
+} from './webrtc.js';
 
 let artBoard;
 let artBoardContext;
@@ -12,11 +12,13 @@ let state = {
     myCoords: {
         oldC: null,
         oldMidC: null,
+        strokeColor: '#4CAF50'
         // currentC: null
     },
     hisCoords: {
         oldC: null,
         oldMidC: null,
+        strokeColor: '##ff0000'
         // currentC: null
     },
     isDrawing: false,
@@ -37,22 +39,25 @@ const drawPoint = (currentC, coords) => {
         oldC,
         oldMidC,
     } = coords;
-
+    let { strokeColor } = coords; 
     if (!oldC) {
         oldC = currentC;
         oldMidC = currentC;
     }
+    artBoardContext.strokeStyle = strokeColor;
     let currentMidC = getMidInputCoords(currentC, oldC);
     artBoardContext.beginPath();
     artBoardContext.moveTo(currentMidC.x, currentMidC.y);
     artBoardContext.quadraticCurveTo(oldC.x, oldC.y, oldMidC.x, oldMidC.y);
     artBoardContext.stroke();
+    // artBoardContext.strokeStyle = '#000000';
 
     oldC = currentC;
     oldMidC = currentMidC;
     return {
         oldC,
         oldMidC,
+        strokeColor
     };
 }
 
@@ -117,6 +122,7 @@ window.addEventListener("load", () => {
                     hisCoords: {
                         oldC: null,
                         oldMidC: null,
+                        strokeColor: '#ff0000'
                     }
                 }));
                 break;
@@ -164,6 +170,7 @@ window.addEventListener("load", () => {
             myCoords: {
                 oldC: null,
                 oldMidC: null,
+                strokeColor: '#4CAF50'
             }
         }));
     }
