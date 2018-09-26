@@ -3,7 +3,7 @@ import "./assets/less/app.less";
 import {
     dataChannelIncomingSubject,
     dataChannelOutgoingSubject
-} from './webrtc.js';
+} from './socket';
 
 let artBoard;
 let artBoardContext;
@@ -98,7 +98,7 @@ window.addEventListener("load", () => {
     initialise();
     dataChannelIncomingSubject.subscribe((message) => {
         console.log('Incoming:', message);
-        let parsedMessage = JSON.parse(message);
+        let parsedMessage = message;
         let mousePoint = getCanvasPosition(artBoard, parsedMessage.clientX, parsedMessage.clientY);
         switch (parsedMessage.eventType) {
             case 'mousemove':
@@ -127,16 +127,16 @@ window.addEventListener("load", () => {
                 }));
                 break;
             default:
-                throw ('Unsupported event type');
+                console.log('Unsupported event type');
         }
 
     });
     artBoard.onmousemove = (event) => {
-        dataChannelOutgoingSubject.next(JSON.stringify({
+        dataChannelOutgoingSubject.next({
             eventType: 'mousemove',
             clientX: event.clientX,
             clientY: event.clientY
-        }));
+        });
         let mousePoint = getCanvasPosition(artBoard, event.clientX, event.clientY);
         if (getState().isDrawing) {
             setState(Object.assign({}, state, {
@@ -145,11 +145,11 @@ window.addEventListener("load", () => {
         }
     }
     artBoard.onmousedown = (event) => {
-        dataChannelOutgoingSubject.next(JSON.stringify({
+        dataChannelOutgoingSubject.next({
             eventType: 'mousedown',
             clientX: event.clientX,
             clientY: event.clientY
-        }));
+        });
         let mousePoint = getCanvasPosition(artBoard, event.clientX, event.clientY);
         setState(Object.assign({}, state, {
             isDrawing: true
@@ -159,11 +159,11 @@ window.addEventListener("load", () => {
         }));
     }
     artBoard.onmouseup = (event) => {
-        dataChannelOutgoingSubject.next(JSON.stringify({
+        dataChannelOutgoingSubject.next({
             eventType: 'mouseup',
             clientX: event.clientX,
             clientY: event.clientY
-        }));
+        });
         let mousePoint = getCanvasPosition(artBoard, event.clientX, event.clientY);
         setState(Object.assign({}, state, {
             isDrawing: false,

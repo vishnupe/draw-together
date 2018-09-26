@@ -1,7 +1,5 @@
 import io from 'socket.io-client';
 import {
-    fromEvent,
-    merge,
     Subject
 } from 'rxjs';
 
@@ -20,8 +18,13 @@ let configuration = {
     }]
 };
 
-// Create a random room if not already present in the URL.
+let myClientid;
 let isInitiator;
+let peerConnections = {};
+let dataChannels = {};
+window.peerConnections = peerConnections;
+
+// Create a random room if not already present in the URL.
 let room = window.location.hash.substring(1);
 if (!room) {
     room = window.location.hash = randomToken();
@@ -31,146 +34,118 @@ if (!room) {
 /****************************************************************************
  * Signaling server
  ****************************************************************************/
-
-socket.on('ipaddr', function (ipaddr) {
-    console.log('Server IP address is: ' + ipaddr);
+socket.on('connected', function (clientId) {
+    console.log('Connected with clientId', clientId);
+    myClientid = clientId
 });
 
-socket.on('created', function (room, clientId) {
-    console.log('Created room', room, '- my client ID is', clientId);
-    isInitiator = true;
+socket.on('joined', function (clientIds) {
+    console.log('joined', clientIds);
+    clientIds.forEach(clientId => {
+        createPeerConnection(false, configuration, clientId);
+    });
 });
 
-socket.on('joined', function (room, clientId) {
-    console.log('This peer has joined room', room, 'with client ID', clientId);
-    isInitiator = false;
-    createPeerConnection(isInitiator, configuration);
+socket.on('new_client_joined', function (clientId, numClient) {
+    console.log('new_client_joined', clientId, numClient);
+    // isInitiator = false;
+    createPeerConnection(true, configuration, clientId);
 });
 
-socket.on('full', function (room) {
-    alert('Room ' + room + ' is full. We will create a new room for you.');
-    window.location.hash = '';
-    window.location.reload();
-});
+socket.on('message', (fromId, message) => {
+    var currentConnection = peerConnections[fromId];
+    if (currentConnection) {
+        if (message.type === 'offer') {
+            currentConnection.setRemoteDescription(new RTCSessionDescription(message), () =>  {},
+                logError);
+            currentConnection.createAnswer((desc) => {
+                currentConnection.setLocalDescription(desc, () => {
+                    sendMessage(fromId, currentConnection.localDescription);
+                }, logError);
+            }, logError);
 
-socket.on('ready', function () {
-    console.log('Socket is ready');
-    createPeerConnection(isInitiator, configuration);
-});
+        } else if (message.type === 'answer') {
+            // console.log('Got answer.');
+            currentConnection.setRemoteDescription(new RTCSessionDescription(message), () =>  {},
+                logError);
 
-socket.on('log', function (array) {
-    console.log.apply(console, array);
-});
+        } else if (message.type === 'candidate') {
+            currentConnection.addIceCandidate(new RTCIceCandidate({
+                candidate: message.candidate
+            })).catch((err) => {
+                console.log(err)
+            });
 
-socket.on('message', function (message) {
-    // console.log('Client received message:', message);
-    signalingMessageCallback(message);
+        } else if (message === 'bye') {
+            // TODO: cleanup RTC connection?
+        }
+    }
 });
 
 // Join a room
 socket.emit('create or join', room);
 
-if (location.hostname.match(/localhost|127\.0\.0/)) {
-    socket.emit('ipaddr');
-}
 
 /**
  * Send message to signaling server
  */
-function sendMessage(message) {
-    // console.log('Client sending message: ', message);
-    socket.emit('message', message);
+function sendMessage(toClientid, message) {
+    socket.emit('message', toClientid, message);
 }
 
 /****************************************************************************
  * WebRTC peer connection and data channel
  ****************************************************************************/
 
-let peerConn;
-let dataChannel;
-
-function signalingMessageCallback(message) {
-    if (message.type === 'offer') {
-        // console.log('Got offer. Sending answer to peer.');
-        peerConn.setRemoteDescription(new RTCSessionDescription(message), function () {},
-            logError);
-        peerConn.createAnswer(onLocalSessionCreated, logError);
-
-    } else if (message.type === 'answer') {
-        // console.log('Got answer.');
-        peerConn.setRemoteDescription(new RTCSessionDescription(message), function () {},
-            logError);
-
-    } else if (message.type === 'candidate') {
-        peerConn.addIceCandidate(new RTCIceCandidate({
-            candidate: message.candidate
-        }));
-
-    } else if (message === 'bye') {
-        // TODO: cleanup RTC connection?
-    }
-}
-
-function createPeerConnection(isInitiator, config) {
+function createPeerConnection(isInitiator, config, clientId) {
     // console.log('Creating Peer connection as initiator?', isInitiator, 'config:', config);
-    peerConn = new RTCPeerConnection(config);
-
+    let peerConn = peerConnections[clientId] = new RTCPeerConnection(config);
     // send any ice candidates to the other peer
     peerConn.onicecandidate = function (event) {
-        // console.log('icecandidate event:', event);
+        console.log('icecandidate event:', event.candidate);
         if (event.candidate) {
-            sendMessage({
+            sendMessage(clientId, {
                 type: 'candidate',
                 label: event.candidate.sdpMLineIndex,
                 id: event.candidate.sdpMid,
                 candidate: event.candidate.candidate
             });
-        } else {
-            // console.log('End of candidates.');
-        }
+        } else {}
     };
 
     if (isInitiator) {
-        // console.log('Creating Data Channel');
-        dataChannel = peerConn.createDataChannel('channel');
-        onDataChannelCreated(dataChannel);
+        let dataChannel = peerConn.createDataChannel('channel');
+        onDataChannelCreated(dataChannel, clientId);
 
-        // console.log('Creating an offer');
-        peerConn.createOffer(onLocalSessionCreated, logError);
+        peerConn.createOffer((desc) => {
+            peerConn.setLocalDescription(desc, function () {
+                sendMessage(clientId, peerConn.localDescription);
+            }, logError);
+        }, logError);
     } else {
         peerConn.ondatachannel = function (event) {
-            // console.log('ondatachannel:', event.channel);
-            dataChannel = event.channel;
-            onDataChannelCreated(dataChannel);
+            let dataChannel = event.channel;
+            onDataChannelCreated(dataChannel, clientId);
         };
     }
 }
 
-function onLocalSessionCreated(desc) {
-    // console.log('local session created:', desc);
-    peerConn.setLocalDescription(desc, function () {
-        // console.log('sending local desc:', peerConn.localDescription);
-        sendMessage(peerConn.localDescription);
-    }, logError);
-}
-
-function onDataChannelCreated(channel) {
-    // console.log('onDataChannelCreated:', channel);
-
+function onDataChannelCreated(channel, clientId) {
+    // let index = dataChannels.length;
+    console.log('CHANNEL created!!!');
     channel.onopen = function () {
         console.log('CHANNEL opened!!!');
-        // channel.send('Sendinggggg' + isInitiator);
-        dataChannelOutgoingSubject.subscribe( message => {
-            channel.send(message);
+        dataChannelOutgoingSubject.subscribe(message => {
+            let newMessage = Object.assign({}, message, {
+                clientId
+            })
+            channel.send(JSON.stringify(newMessage));
         })
     };
-
-    // channel.onmessage = (adapter.browserDetails.browser === 'firefox') ?
-    //     receiveDataFirefoxFactory() : receiveDataChromeFactory();
     channel.onmessage = (message) => {
-        // console.log(message);
-        dataChannelIncomingSubject.next(message.data);
+        dataChannelIncomingSubject.next(JSON.parse(message.data));
     }
+    dataChannels[clientId] = channel;
 }
 
 function randomToken() {

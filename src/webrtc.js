@@ -1,4 +1,3 @@
-
 import io from 'socket.io-client';
 import {
     fromEvent,
@@ -162,15 +161,15 @@ function onDataChannelCreated(channel) {
         console.log('CHANNEL opened!!!');
         // channel.send('Sendinggggg' + isInitiator);
         dataChannelOutgoingSubject.subscribe( message => {
-            channel.send(message);
+            channel.send(JSON.stringify(message));
         })
     };
 
     // channel.onmessage = (adapter.browserDetails.browser === 'firefox') ?
     //     receiveDataFirefoxFactory() : receiveDataChromeFactory();
     channel.onmessage = (message) => {
-        // console.log(message);
-        dataChannelIncomingSubject.next(message.data);
+        console.log(message);
+        dataChannelIncomingSubject.next(JSON.parse(message.data));
     }
 }
 
